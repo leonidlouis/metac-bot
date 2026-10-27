@@ -1,6 +1,11 @@
 import argparse
 import asyncio
 import logging
+import os
+import re
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -41,8 +46,90 @@ from forecasting_tools import (
     structure_output,
 )
 
+import free_guard
+from free_guard import CallBudgetExhausted
+
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
+
+# ----------------------------------------------------------------------------
+# FREE-ONLY MODEL CONFIG ($0 spend). Every id must be 'openrouter/<id>:free';
+# free_guard refuses anything else. The first entry that OpenRouter currently
+# lists as free is used; the remaining ones are sent as OpenRouter fallbacks
+# (extra_body.models) so a busy model doesn't cost us an extra request.
+# Override with comma-separated env vars FORECASTER_MODELS / PARSER_MODELS.
+# ----------------------------------------------------------------------------
+FORECASTER_MODELS = [
+    "openrouter/thinkingmachines/inkling:free",  # 975B/41B MoE, AA index 25
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",  # 550B/55B, AA index 23
+    "openrouter/thinkingmachines/inkling-small:free",  # 276B/12B, AA index 26
+]
+PARSER_MODELS = [
+    "openrouter/thinkingmachines/inkling-small:free",
+    "openrouter/nvidia/nemotron-3.5-super-vl:free",
+    "openrouter/google/gemma-4-31b-it:free",
+]
+
+# Rough LLM requests needed per question (forecast + parse, no retries).
+# Used to skip a question up front instead of half-finishing it.
+CALLS_NEEDED_PER_QUESTION = 2
+CALLS_NEEDED_PER_CONDITIONAL = 8
+
+
+def _models_from_env(var: str, default: list[str]) -> list[str]:
+    raw = os.getenv(var)
+    return [m.strip() for m in raw.split(",") if m.strip()] if raw else default
+
+
+def build_free_llm(candidates: list[str], free_ids, **kwargs) -> GeneralLlm:
+    available = free_guard.pick_available(candidates, free_ids)
+    if not available:
+        raise free_guard.PaidModelBlocked(
+            f"None of these free models is currently listed on OpenRouter: {candidates}. "
+            "Update FORECASTER_MODELS/PARSER_MODELS in main.py."
+        )
+    primary, fallbacks = available[0], available[1:3]
+    extra = {"models": [m.removeprefix("openrouter/") for m in [primary] + fallbacks]}
+    logger.info(f"Using free model {primary} (fallbacks: {fallbacks})")
+    return GeneralLlm(model=primary, extra_body=extra, **kwargs)
+
+
+def news_headlines(query: str, max_items: int = 10) -> str:
+    """Free, no-LLM research: recent Google News RSS headlines for the query."""
+    words = re.findall(r"[A-Za-z0-9$%.'-]+", query)
+    stop = {
+        "will", "the", "a", "an", "of", "in", "on", "by", "to", "for", "be", "is",
+        "before", "after", "than", "more", "less", "at", "or", "and", "what",
+        "which", "who", "how", "many", "much", "does", "do", "with", "from",
+        "as", "it", "its", "this", "that", "between", "least", "most",
+    }
+    keywords = [w for w in words if w.lower() not in stop][:8]
+    if not keywords:
+        return ""
+    url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
+        {"q": " ".join(keywords), "hl": "en-US", "gl": "US", "ceid": "US:en"}
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            root = ET.fromstring(resp.read())
+    except Exception as e:
+        logger.warning(f"News lookup failed: {type(e).__name__}: {e}")
+        return ""
+    lines = []
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        date = (item.findtext("pubDate") or "").strip()
+        if title:
+            lines.append(f"- {title} ({date})")
+        if len(lines) >= max_items:
+            break
+    if not lines:
+        return ""
+    return (
+        f"Recent news headlines (Google News search: '{' '.join(keywords)}'). "
+        "Headlines only; may be incomplete or partly irrelevant:\n" + "\n".join(lines)
+    )
 
 
 class FallTemplateBot2026(ForecastBot):
@@ -124,7 +211,33 @@ class FallTemplateBot2026(ForecastBot):
         1  # Set this to whatever works for your search-provider/ai-model rate limits
     )
     _concurrency_limiter = asyncio.Semaphore(_max_concurrent_questions)
-    _structure_output_validation_samples = 2
+    _structure_output_validation_samples = 1  # 1 parse call per forecast (free quota)
+    _question_lock = asyncio.Lock()  # one question at a time (20 req/min free cap)
+
+    @classmethod
+    def _llm_config_defaults(cls) -> dict[str, str | GeneralLlm | None]:
+        # Never let forecasting-tools build its (paid) default models.
+        return {
+            "default": None,
+            "summarizer": None,
+            "researcher": "no_research",
+            "parser": None,
+        }
+
+    async def _run_individual_question(self, question: MetaculusQuestion):
+        async with self._question_lock:
+            needed = (
+                CALLS_NEEDED_PER_CONDITIONAL
+                if isinstance(question, ConditionalQuestion)
+                else CALLS_NEEDED_PER_QUESTION
+            )
+            if free_guard.BUDGET.remaining < needed:
+                raise CallBudgetExhausted(
+                    f"Skipping {question.page_url}: needs ~{needed} LLM calls, "
+                    f"only {free_guard.BUDGET.remaining} left in today's free quota. "
+                    "It will be retried on a later run if still open."
+                )
+            return await super()._run_individual_question(question)
 
     ##################################### RESEARCH #####################################
 
@@ -156,6 +269,10 @@ class FallTemplateBot2026(ForecastBot):
                     use_advanced_filters=False,
                 )
                 research = await searcher.invoke(prompt)
+            elif researcher == "free-news-headlines":
+                research = await asyncio.to_thread(
+                    news_headlines, question.question_text
+                )
             elif not researcher or researcher == "None" or researcher == "no_research":
                 research = ""
             else:
@@ -249,6 +366,7 @@ class FallTemplateBot2026(ForecastBot):
             model=self.get_llm("parser", "llm"),
             num_validation_samples=self._structure_output_validation_samples,
             additional_instructions=parsing_instructions,
+            allowed_tries=2,
         )
         decimal_pred = max(0.01, min(0.99, binary_prediction.prediction_in_decimal))
 
@@ -325,6 +443,7 @@ class FallTemplateBot2026(ForecastBot):
             model=self.get_llm("parser", "llm"),
             num_validation_samples=self._structure_output_validation_samples,
             additional_instructions=parsing_instructions,
+            allowed_tries=2,
         )
 
         logger.info(
@@ -423,6 +542,7 @@ class FallTemplateBot2026(ForecastBot):
             model=self.get_llm("parser", "llm"),
             additional_instructions=parsing_instructions,
             num_validation_samples=self._structure_output_validation_samples,
+            allowed_tries=2,
         )
         prediction = NumericDistribution.from_question(percentile_list, question)
         logger.info(
@@ -515,6 +635,7 @@ class FallTemplateBot2026(ForecastBot):
             model=self.get_llm("parser", "llm"),
             additional_instructions=parsing_instructions,
             num_validation_samples=self._structure_output_validation_samples,
+            allowed_tries=2,
         )
 
         percentile_list = [
@@ -701,31 +822,53 @@ if __name__ == "__main__":
     run_mode: Literal["tournament", "metaculus_cup", "test_questions"] = args.mode
 
     check_environment(strict=True)
-    publish_to_metaculus = True
+    free_guard.install()  # from here on, only openrouter/*:free calls can happen
+    publish_to_metaculus = os.getenv("PUBLISH_TO_METACULUS", "true").lower() == "true"
     print_startup_banner(run_mode, will_publish=publish_to_metaculus)
+
+    try:
+        free_ids = free_guard.available_free_model_ids()
+    except Exception as e:
+        logger.warning(f"Could not list OpenRouter models ({type(e).__name__}); using static list.")
+        free_ids = None
+    forecaster_llm = build_free_llm(
+        _models_from_env("FORECASTER_MODELS", FORECASTER_MODELS),
+        free_ids,
+        temperature=0.3,
+        timeout=300,
+        allowed_tries=2,
+    )
+    parser_llm = build_free_llm(
+        _models_from_env("PARSER_MODELS", PARSER_MODELS),
+        free_ids,
+        temperature=0.0,
+        timeout=180,
+        allowed_tries=1,
+    )
+    if os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET"):
+        researcher = "asknews/news-summaries"  # free bot-maker plan, not an LLM call
+    else:
+        researcher = "free-news-headlines"  # Google News RSS, no LLM call
+    free_guard.compute_run_budget()
 
     # Configure the bot. The `llms=` block below is commented out to use
     # whichever default models forecasting-tools picks based on your env vars;
     # uncomment and edit to pin specific models.
     template_bot = FallTemplateBot2026(
         research_reports_per_question=1,
-        predictions_per_research_report=5,
+        predictions_per_research_report=1,  # 1 forecast/question to fit the free quota
         use_research_summary_to_forecast=False,
+        enable_summarize_research=False,  # saves an LLM call per question
         publish_reports_to_metaculus=publish_to_metaculus,
         folder_to_save_reports_to=None,
         skip_previously_forecasted_questions=True,
         extra_metadata_in_explanation=True,
-        # llms={
-        #     "default": GeneralLlm(
-        #         model="openrouter/openai/gpt-4o",
-        #         temperature=0.3,
-        #         timeout=40,
-        #         allowed_tries=2,
-        #     ),
-        #     "summarizer": "openai/gpt-4o-mini",
-        #     "researcher": "asknews/news-summaries",
-        #     "parser": "openai/gpt-4o-mini",
-        # },
+        llms={
+            "default": forecaster_llm,
+            "summarizer": parser_llm,  # unused (summaries disabled)
+            "researcher": researcher,
+            "parser": parser_llm,
+        },
     )
 
     # Per-mode tournament URL shown in the summary banner footer. These
@@ -775,6 +918,23 @@ if __name__ == "__main__":
             )
         )
 
+    logger.info(
+        f"[free_guard] LLM calls used this run: {free_guard.BUDGET.used}/{free_guard.BUDGET.limit}"
+    )
+    # Questions skipped for lack of free quota are expected, not failures:
+    # drop them before the summary (which raises on any exception).
+    def _is_budget_skip(r) -> bool:
+        return isinstance(r, BaseException) and (
+            "CallBudgetExhausted" in repr(r) or "free quota" in str(r) or "call budget" in str(r)
+        )
+
+    budget_skips = [r for r in forecast_reports if _is_budget_skip(r)]
+    if budget_skips:
+        logger.warning(
+            f"{len(budget_skips)} question(s) skipped for lack of free quota; "
+            "they will be retried next run if still open."
+        )
+    forecast_reports = [r for r in forecast_reports if not _is_budget_skip(r)]
     template_bot.log_report_summary(forecast_reports)
     print_run_summary_banner(
         forecast_reports,

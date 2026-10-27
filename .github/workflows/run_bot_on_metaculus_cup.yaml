@@ -34,11 +34,13 @@ jobs:
         # this reads the environment variables from the github repository.
         # Store under Settings --> Secrets and variables --> Actions
         env:
-          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }} # replace this with the name of the variable under which you stored your own Metaculus token
-          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
-          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          # Free-only mode: OpenRouter ':free' models only (see free_guard.py).
+          # Paid-provider keys (OpenAI/Anthropic/Perplexity/Exa) are deliberately NOT passed.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional free AskNews bot-maker plan; ignored if the secrets don't exist.
           ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
           ASKNEWS_SECRET: ${{ secrets.ASKNEWS_SECRET }}
+          # Hard caps on LLM requests (OpenRouter free tier = 50 requests/day, 20/min).
+          MAX_LLM_CALLS_PER_DAY: "50"
+          MAX_LLM_CALLS_PER_RUN: "24"

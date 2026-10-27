@@ -57,7 +57,7 @@ def silence_noisy_dependencies() -> None:
 
 def check_environment(strict: bool = True) -> None:
     """
-    Verify METACULUS_TOKEN is set; warn if no LLM key is configured. On
+    Verify METACULUS_TOKEN and OPENROUTER_API_KEY are set. On
     failure with strict=True, exits the process with a non-zero status.
     """
     problems: list[str] = []
@@ -68,15 +68,13 @@ def check_environment(strict: bool = True) -> None:
             "Get one at https://www.metaculus.com/futureeval/participate/"
         )
 
-    has_llm_key = any(
-        _is_real_env(k)
-        for k in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
-    )
-    if not has_llm_key:
-        print(
-            "⚠️  No LLM key set (OPENROUTER/OPENAI/ANTHROPIC). The bot will fall back\n"
-            "    to the Metaculus LLM proxy. Free OpenRouter credits: "
-            "https://forms.gle/aQdYMq9Pisrf1v7d8\n"
+    # $0-spend mode: the bot only runs on free OpenRouter models, so an
+    # OpenRouter key is required (the Metaculus proxy fallback is not used).
+    if not _is_real_env("OPENROUTER_API_KEY"):
+        problems.append(
+            "OPENROUTER_API_KEY is missing. Create a free key at "
+            "https://openrouter.ai/settings/keys (no credits needed; the bot "
+            "only calls ':free' models) and add it as a repo secret."
         )
 
     if problems:
