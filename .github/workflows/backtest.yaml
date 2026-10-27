@@ -42,7 +42,7 @@ jobs:
       - run: uv sync --locked
       - name: Fetch resolved questions
         if: ${{ inputs.step == 'fetch' }}
-        run: uv run python backtest/fetch_questions.py
+        run: uv run python backtest/${{ inputs.variant == 'debug' && 'debug_dump.py' || 'fetch_questions.py' }}
         env:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
       - name: Forecast resolved questions (no publishing)
