@@ -124,13 +124,28 @@ def headlines(query: str, before: datetime, after: datetime, n: int = 12) -> str
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--since", default="2026-08-01")
+    ap.add_argument("--since", default="2026-06-01")
     ap.add_argument("--max", type=int, default=150)
     ap.add_argument("--out", default="backtest/data/questions.json")
     args = ap.parse_args()
     since = datetime.fromisoformat(args.since).replace(tzinfo=timezone.utc)
 
     rows, seen = [], set()
+    try:
+        req = urllib.request.Request(
+            "https://www.metaculus.com/api/projects/tournaments/",
+            headers={"Authorization": f"Token {os.environ['METACULUS_TOKEN']}", "User-Agent": "metac-bot-backtest"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            tl = json.loads(r.read())
+        tl = tl.get("results", tl) if isinstance(tl, dict) else tl
+        for t in tl:
+            slug_ = str(t.get("slug", ""))
+            if any(k in slug_ for k in ("minibench", "futureeval", "cup", "aib", "bench")):
+                print("tournament:", t.get("id"), slug_, t.get("start_date"), t.get("close_date"))
+                if "minibench" in slug_ and slug_ not in TOURNAMENTS:
+                    TOURNAMENTS[slug_] = t.get("id")
+    except Exception as e:  # noqa: BLE001
+        print("tournament list failed:", type(e).__name__)
     for slug, tid in TOURNAMENTS.items():
         offset = 0
         while True:
@@ -147,6 +162,10 @@ def main():
             )
             res = data.get("results") or []
             print(f"{slug}: offset {offset}: {len(res)} posts")
+            for post in res[:2]:
+                qq = post.get("question") or {}
+                print("   sample:", post.get("id"), qq.get("type"), repr(qq.get("resolution")),
+                      qq.get("open_time"), qq.get("actual_close_time"), list((qq.get("aggregations") or {}).keys()))
             for post in res:
                 q = post.get("question") or {}
                 if q.get("type") != "binary" or post["id"] in seen:
