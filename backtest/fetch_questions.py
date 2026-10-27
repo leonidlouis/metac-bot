@@ -57,6 +57,19 @@ def api_get(params: dict) -> dict:
     return {"results": []}
 
 
+def api_get_detail(pid: int) -> dict:
+    req = urllib.request.Request(
+        f"{API}{pid}/",
+        headers={"Authorization": f"Token {os.environ['METACULUS_TOKEN']}", "User-Agent": "metac-bot-backtest"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read())
+    except Exception as e:  # noqa: BLE001
+        print(f"  detail {pid} failed: {type(e).__name__}")
+        return {}
+
+
 def parse_dt(s):
     if not s:
         return None
@@ -170,6 +183,16 @@ def main():
                 q = post.get("question") or {}
                 if q.get("type") != "binary" or post["id"] in seen:
                     continue
+                if q.get("resolution") is None:  # list endpoint may omit it
+                    det = api_get_detail(post["id"])
+                    time.sleep(0.4)
+                    if det.get("question"):
+                        post = det
+                        q = det["question"]
+                    if not getattr(main, "_printed", False):
+                        main._printed = True
+                        print("   detail keys:", sorted(q.keys()))
+                        print("   detail resolution:", repr(q.get("resolution")), q.get("status"), q.get("resolution_set_time"))
                 resolution = str(q.get("resolution", "")).lower()
                 if resolution not in ("yes", "no"):
                     continue
