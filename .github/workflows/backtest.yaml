@@ -40,11 +40,9 @@ jobs:
         with:
           version: "0.13.1"
       - run: uv sync --locked
-      - name: Fetch resolved questions
+      - name: Fetch resolved Polymarket questions + pre-T news (no LLM)
         if: ${{ inputs.step == 'fetch' }}
-        run: uv run python backtest/${{ inputs.variant == 'debug' && 'debug_dump.py' || 'fetch_questions.py' }}
-        env:
-          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+        run: uv run python backtest/fetch_polymarket.py
       - name: Forecast resolved questions (no publishing)
         if: ${{ inputs.step == 'run' }}
         run: >
