@@ -61,7 +61,7 @@ RESOLUTION CRITERIA (not yet satisfied as of today):
 FINE PRINT:
 {q['fine_print']}
 
-NEWS HEADLINES (published before today; may be incomplete or partly irrelevant):
+NEWS HEADLINES (published before today; may be incomplete, partly irrelevant, or about a similar but different entity, instrument or date range):
 {q['research'] or 'No headlines found.'}
 
 Today is {today.strftime("%Y-%m-%d")}. Forecasting closes {close.strftime("%Y-%m-%d") if close else 'soon'}; the outcome is known around {resolve.strftime("%Y-%m-%d") if resolve else 'unknown'} (about {_days_between(today, resolve)} days from now).
@@ -69,7 +69,7 @@ Today is {today.strftime("%Y-%m-%d")}. Forecasting closes {close.strftime("%Y-%m
 Work through these steps briefly:
 1. Resolution mechanics: exactly what must happen, by when, and per which source, for YES. Note thresholds and whether the current value is above or below them.
 2. Outside view: name a reference class and estimate a base rate for this kind of event in a window of this length. Remember that tournament questions are often written about a change that may or may not happen; the status quo usually persists over short windows.
-3. Inside view: list the specific evidence above that moves you away from the base rate, and how much. Discount weak or speculative headlines.
+3. Inside view: list the specific evidence above that moves you away from the base rate, and how much. Check each headline really matches the question (e.g. Brent vs WTI, a different election round, region or date) before relying on it; discount weak or speculative headlines. If there is little relevant news, stay close to the base rate rather than guessing a story.
 4. Time check: given the days left, how much can realistically change? Short windows strongly favour the status quo.
 5. Final calibration: combine the views. If the outcome is already nearly determined by current facts, be decisive (e.g. 3% or 97%); otherwise avoid extremes.
 

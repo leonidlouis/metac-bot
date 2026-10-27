@@ -20,6 +20,9 @@ on:
         default: ""
       max_questions:
         default: "100"
+      research:
+        description: "research field: research (v2) or research_v1"
+        default: "research"
       reserve:
         description: "free requests to leave for the live hourly bot today"
         default: "20"
@@ -49,7 +52,7 @@ jobs:
           uv run python backtest/run_backtest.py
           --variant "${{ inputs.variant }}" --models "${{ inputs.models }}"
           --skip "${{ inputs.skip }}" --ids "${{ inputs.ids }}"
-          --max-questions "${{ inputs.max_questions }}"
+          --max-questions "${{ inputs.max_questions }}" --research "${{ inputs.research }}"
           --out "backtest/out/${{ inputs.variant }}.jsonl"
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

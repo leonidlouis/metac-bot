@@ -28,7 +28,8 @@ def dt(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
 
 
-def make_prompt(variant: str, q: dict) -> str:
+def make_prompt(variant: str, q: dict, research_field: str = "research") -> str:
+    q = dict(q, research=q.get(research_field) or "")
     today = dt(q["open_time"])
     if variant == "baseline":
         return baseline_prompt(q, today)
@@ -46,6 +47,7 @@ async def main():
     ap.add_argument("--ids", default="", help="only these post_ids (comma list)")
     ap.add_argument("--max-questions", type=int, default=100)
     ap.add_argument("--out", default="backtest/out/results.jsonl")
+    ap.add_argument("--research", default="research", help="research (v2) or research_v1")
     args = ap.parse_args()
 
     free_guard.install()
@@ -75,7 +77,7 @@ async def main():
                 break
             t0 = time.time()
             try:
-                text = await llm.invoke(make_prompt(args.variant, q))
+                text = await llm.invoke(make_prompt(args.variant, q, args.research))
             except CallBudgetExhausted:
                 break
             except Exception as e:  # noqa: BLE001
@@ -85,7 +87,7 @@ async def main():
                 f.flush()
                 continue
             p = parse_probability(text)
-            rec = {"post_id": q["post_id"], "variant": args.variant, "model": llm.model,
+            rec = {"post_id": q["post_id"], "variant": args.variant + ("" if args.research == "research" else "+r1"), "model": llm.model,
                    "p": p, "resolution": q["resolution"], "secs": round(time.time() - t0),
                    "reasoning": text}
             f.write(json.dumps(rec) + "\n")
