@@ -7,11 +7,17 @@ on:
         description: "fetch = pull resolved questions + research (no LLM); run = forecast them"
         default: "run"
       variant:
-        description: "prompt variant (baseline | structured)"
+        description: "prompt variant (baseline | structured | baserate | redteam | ensemble)"
         default: "baseline"
       models:
         description: "comma list of openrouter/<id>:free (blank = main.py default)"
         default: ""
+      ensemble_models:
+        description: "two openrouter/<id>:free for variant=ensemble (blank = default two)"
+        default: ""
+      questions:
+        description: "dataset path (questions.json or questions_expanded.json)"
+        default: "backtest/data/questions.json"
       skip:
         description: "comma list of post_ids to skip"
         default: ""
@@ -51,6 +57,8 @@ jobs:
         run: >
           uv run python backtest/run_backtest.py
           --variant "${{ inputs.variant }}" --models "${{ inputs.models }}"
+          --ensemble-models "${{ inputs.ensemble_models }}"
+          --questions "${{ inputs.questions }}"
           --skip "${{ inputs.skip }}" --ids "${{ inputs.ids }}"
           --max-questions "${{ inputs.max_questions }}" --research "${{ inputs.research }}"
           --out "backtest/out/${{ inputs.variant }}.jsonl"
