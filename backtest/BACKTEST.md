@@ -49,3 +49,23 @@ Winner rule not met → **no production change**. Local main.py default (`struct
 
 Next: ensemble (2 free models, 12 ids = 24 calls) at the next reset; keep extending baserate
 and redteam on ids 25+ to reach N≈40, then re-score (baserate is the lead candidate).
+
+## 2026-10-30 — round 3 blocked: inkling free models withdrawn
+
+OpenRouter now rejects `thinkingmachines/inkling:free` and `inkling-small:free` with
+"only available on agentic harnesses" (seen from ~00:48 UTC Oct 30; the live run at
+23:19 UTC Oct 29 still worked). The ensemble run [40981998189] and baserate extension
+[40982081890] produced no forecasts (inkling refused; nemotron-3-ultra upstream overloaded).
+Failed requests did not count against the free quota (counter still 0 afterwards).
+
+Probes (1 question each): inkling-small refused, gemma-4-31b upstream 429, nemotron-3-ultra
+503 overloaded, nemotron-3.5-super-vl OK.
+
+Production fix 4afca2f: inkling dropped from the live model lists. Forecaster =
+nemotron-3-ultra (fallbacks gemma-4-31b, nemotron-3.5-super-vl); parser = nemotron-3.5-super-vl
+(fallbacks gemma-4-31b, nemotron-3.5-lightning). No prompt change.
+
+Consequence: all arm results so far (baseline/structured/baserate/redteam) were on inkling,
+so they don't transfer cleanly to the new model. Tuning restarts on the new forecaster:
+first a fresh baseline + baserate on PAIRED-12 at a later reset, once the nemotron models
+are reliably up.
