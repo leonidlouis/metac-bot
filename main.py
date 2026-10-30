@@ -59,15 +59,17 @@ logger = logging.getLogger(__name__)
 # (extra_body.models) so a busy model doesn't cost us an extra request.
 # Override with comma-separated env vars FORECASTER_MODELS / PARSER_MODELS.
 # ----------------------------------------------------------------------------
+# 2026-10-30: OpenRouter now rejects inkling:free and inkling-small:free outside
+# "agentic harnesses" (APIError), so they were dropped from both lists.
 FORECASTER_MODELS = [
-    "openrouter/thinkingmachines/inkling:free",  # 975B/41B MoE, AA index 25
     "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",  # 550B/55B, AA index 23
-    "openrouter/thinkingmachines/inkling-small:free",  # 276B/12B, AA index 26
+    "openrouter/google/gemma-4-31b-it:free",
+    "openrouter/nvidia/nemotron-3.5-super-vl:free",
 ]
 PARSER_MODELS = [
-    "openrouter/thinkingmachines/inkling-small:free",
     "openrouter/nvidia/nemotron-3.5-super-vl:free",
     "openrouter/google/gemma-4-31b-it:free",
+    "openrouter/nvidia/nemotron-3.5-lightning:free",
 ]
 
 # Rough LLM requests needed per question (forecast + parse, no retries).
